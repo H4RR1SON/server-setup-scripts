@@ -37,8 +37,16 @@ banner() {
     echo -e "${NC}"
 }
 
+# Determine sudo usage
+SUDO_CMD=""
+if command -v sudo >/dev/null 2>&1; then
+    SUDO_CMD="sudo"
+elif [ "$EUID" -ne 0 ]; then
+    log_warn "sudo is not installed and you are not root. Some commands may fail."
+fi
+
 check_root() {
-    if [ "$EUID" -ne 0 ] && [ -z "$SUDO_USER" ]; then
+    if [ "$EUID" -ne 0 ] && [ -z "$SUDO_CMD" ]; then
         log_warn "This script might need sudo privileges for some parts."
     fi
 }
@@ -53,7 +61,7 @@ check_root
 # 1. Update System
 log_step "Updating system packages..."
 if command -v apt-get &> /dev/null; then
-    sudo apt-get update -qq && sudo apt-get upgrade -y -qq
+    $SUDO_CMD apt-get update -qq && $SUDO_CMD apt-get upgrade -y -qq
     log_success "System updated"
 else
     log_warn "Not a Debian/Ubuntu system? Skipping apt update."
@@ -63,14 +71,14 @@ fi
 log_step "Installing basic development tools..."
 PACKAGES=(curl wget git unzip zip software-properties-common build-essential zsh)
 if command -v apt-get &> /dev/null; then
-    sudo apt-get install -y "${PACKAGES[@]}"
+    $SUDO_CMD apt-get install -y "${PACKAGES[@]}"
     log_success "Basic tools installed"
 fi
 
 # 3. Install Python & uv
 log_step "Installing Python & uv..."
 if ! command -v python3 &> /dev/null; then
-    sudo apt-get install -y python3 python3-pip python3-venv
+    $SUDO_CMD apt-get install -y python3 python3-pip python3-venv
 fi
 if ! command -v uv &> /dev/null; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -92,8 +100,8 @@ fi
 log_step "Installing Node.js & NPM..."
 if ! command -v npm &> /dev/null; then
     # Installing LTS version setup
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-    sudo apt-get install -y nodejs
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | $SUDO_CMD -E bash -
+    $SUDO_CMD apt-get install -y nodejs
     log_success "Node.js & NPM installed"
 else
     log_success "Node.js & NPM already installed"
@@ -113,7 +121,7 @@ fi
 # Gemini CLI
 if ! npm list -g @google/gemini-cli &> /dev/null; then
     log_info "Installing @google/gemini-cli..."
-    sudo npm install -g @google/gemini-cli
+    $SUDO_CMD npm install -g @google/gemini-cli
 else
     log_success "@google/gemini-cli already installed"
 fi
@@ -121,7 +129,7 @@ fi
 # OpenAI Codex
 if ! npm list -g @openai/codex &> /dev/null; then
     log_info "Installing @openai/codex..."
-    sudo npm install -g @openai/codex || log_warn "Could not install @openai/codex (package might not exist publicly), continuing..."
+    $SUDO_CMD npm install -g @openai/codex || log_warn "Could not install @openai/codex (package might not exist publicly), continuing..."
 else
     log_success "@openai/codex already installed"
 fi
@@ -238,12 +246,12 @@ log_step "Customizing Shell (pfetch & starship)..."
 
 # pfetch
 if [ ! -f "/usr/local/bin/pfetch" ]; then
-    sudo curl -sSL https://github.com/dylanaraps/pfetch/raw/master/pfetch -o /usr/local/bin/pfetch
-    sudo chmod +x /usr/local/bin/pfetch
+    $SUDO_CMD curl -sSL https://github.com/dylanaraps/pfetch/raw/master/pfetch -o /usr/local/bin/pfetch
+    $SUDO_CMD chmod +x /usr/local/bin/pfetch
 fi
 
 # MOTD
-sudo tee /etc/update-motd.d/01-custom > /dev/null << 'MOTD_EOF'
+$SUDO_CMD tee /etc/update-motd.d/01-custom > /dev/null << 'MOTD_EOF'
 #!/bin/bash
 if command -v pfetch >/dev/null 2>&1; then
     pfetch
@@ -251,16 +259,16 @@ else
     echo "Server: $(hostname)"
 fi
 MOTD_EOF
-sudo chmod +x /etc/update-motd.d/01-custom
+$SUDO_CMD chmod +x /etc/update-motd.d/01-custom
 
 # Disable default Ubuntu MOTDs
 for script in 00-header 10-help-text 50-landscape-sysinfo 50-motd-news 90-updates-available; do
-    [ -f "/etc/update-motd.d/$script" ] && sudo chmod -x "/etc/update-motd.d/$script" 2>/dev/null
+    [ -f "/etc/update-motd.d/$script" ] && $SUDO_CMD chmod -x "/etc/update-motd.d/$script" 2>/dev/null
 done
 
 # Starship
 if ! command -v starship &> /dev/null; then
-    curl -sS https://starship.rs/install.sh | sudo sh -s -- --yes
+    curl -sS https://starship.rs/install.sh | $SUDO_CMD sh -s -- --yes
 fi
 
 mkdir -p ~/.config
@@ -301,4 +309,8 @@ log_success "Shell customization complete"
 log_step "Setup Finished!"
 echo -e "${GREEN}All tasks completed successfully.${NC}"
 echo -e "Please restart your session or run 'zsh' to see changes."
-echo -e "Don't forget to change your default shell: sudo chsh -s \$(which zsh) \$USER"
+if [ -n "$SUDO_CMD" ]; then
+    echo -e "Don't forget to change your default shell: $SUDO_CMD chsh -s \$(which zsh) \$USER"
+else
+    echo -e "Don't forget to change your default shell: chsh -s \$(which zsh) \$USER"
+fi
